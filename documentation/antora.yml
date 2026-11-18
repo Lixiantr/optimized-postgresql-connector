@@ -1,0 +1,6 @@
+name: optimized-postgresql-connector
+title: Optimized PostgreSQL Connector
+version: '0.1'
+start_page: ROOT:index.adoc
+nav:
+  - modules/ROOT/nav.adoc

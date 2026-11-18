@@ -1,0 +1,214 @@
+[id="optimized-postgresql-connector"]
+= Optimized connector для PostgreSQL
+:toc:
+:toclevels: 3
+:sectanchors:
+:source-highlighter: highlight.js
+
+== Обзор
+
+Параметры сравниваются с Debezium PostgreSQL `3.6.0.Final`.
+
+== Как работает коннектор
+
+Коннектор читает PostgreSQL через `pgoutput`, выполняет обработку собственным параллельным pipeline и работает как одна Kafka Connect task. Увеличение `tasks.max` не заменяет настройку внутренних потоков. Полная взаимозаменяемость всех конфигураций Debezium для этой версии не заявляется: ниже перечислены ограничения native path.
+
+== Подготовка PostgreSQL
+
+Требуются Java 21, Kafka Connect совместимой версии 4.3.x и PostgreSQL с `wal_level=logical`. Пользователю PostgreSQL нужны LOGIN, REPLICATION, доступ к базе, USAGE на схемы и SELECT на захватываемые таблицы. Права на создание publication нужны только при её автоматическом создании. Подготовку publication и replica identity согласуйте с администратором БД.
+
+== Развёртывание
+
+Соберите каталог плагина по инструкции в link:../../../../../optimized-connector-postgres/README.md[README модуля].
+В каталоге должны находиться `optimized-postgres-connector.jar` и `postgresql-42.7.11.jar`.
+
+Поместите каталог под `plugin.path` каждого worker и перезапустите Kafka Connect. Через `GET /connector-plugins` проверьте, что worker видит класс `io.cdcbench.connect.optimized.OptimizedPostgresConnector`.
+Kafka Connect API и Kafka clients предоставляет worker. Пользовательские converters и SMT устанавливайте с их зависимостями.
+
+== Минимальная явная конфигурация
+
+Пример предназначен для нового, отдельно подготовленного slot и publication. `initial` читает существующие данные перед streaming; `no_data` не выполняет начальную выгрузку строк. Не подключайте оригинальный и наш коннекторы одновременно к одному slot.
+
+[source,json]
+----
+{
+  "name": "optimized-postgres",
+  "config": {
+    "connector.class": "io.cdcbench.connect.optimized.OptimizedPostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres.example.com",
+    "database.port": "5432",
+    "database.user": "cdc_user",
+    "database.password": "REPLACE_WITH_SECRET",
+    "database.dbname": "application",
+    "database.sslmode": "verify-full",
+    "database.sslrootcert": "/etc/kafka-connect/secrets/postgres-ca.crt",
+    "topic.prefix": "application",
+    "plugin.name": "pgoutput",
+    "slot.name": "optimized_application",
+    "publication.name": "optimized_application_pub",
+    "publication.autocreate.mode": "disabled",
+    "table.include.list": "public\\.orders",
+    "snapshot.mode": "initial",
+    "schema.refresh.mode": "columns_diff_exclude_unchanged_toast",
+    "include.schema.changes": "false",
+    "extended.headers.enabled": "false",
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "1000",
+    "poll.interval.ms": "100",
+    "max.batch.size": "8192",
+    "max.queue.size": "32768",
+    "optimized.execution.mode": "fast",
+    "optimized.processing.workers": "1",
+    "optimized.processing.chunk.size": "512",
+    "optimized.max.inflight.transactions": "16",
+    "optimized.max.inflight.bytes": "67108864",
+    "optimized.transaction.spill.directory": "/var/lib/kafka-connect/optimized-spill",
+    "key.converter": "io.cdcbench.connect.optimized.OptimizedJsonConverter",
+    "value.converter": "io.cdcbench.connect.optimized.OptimizedJsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}
+----
+
+Замените адрес, имена объектов и секрет перед отправкой через `POST /connectors`. Пароли не сохраняйте в Git. Сертификат и каталог spill должны быть доступны на всех workers, где может запуститься task. `verify-full` требует сертификат с корректным именем сервера. Значения примера — выбранный профиль, а не новые defaults; например, tombstone явно включён для совместимости с потребителями compacted topics.
+
+== Настройка коннектора
+
+Во втором столбце приведены defaults оригинального Debezium 3.6 из сохранённого контракта, в третьем — фактические значения по умолчанию оптимизированного коннектора или необходимые явные значения. «Не задано» означает отсутствие настроенного значения, а не отключение всей функции. Значения `optimized.*` отсутствуют у оригинала.
+
+REST `config()` нашего коннектора публикует сохранённый контракт оригинала. Его отображаемые defaults не всегда совпадают с runtime defaults `CandidateConfig` и `OptimizedSettings`. Поэтому важные параметры задавайте явно, как в примере. Поддерживаемые варианты приведены в таблице.
+
+=== Подключение и репликация
+
+[cols="40%a,25%a,35%a",options="header"]
+|===
+|Параметр и для чего он нужен | Оригинальный Debezium | Наш коннектор
+|`connector.class` — выбор реализации | `io.debezium.connector.postgresql.PostgresConnector` | `io.cdcbench.connect.optimized.OptimizedPostgresConnector`
+|`tasks.max` — число Connect tasks | PostgreSQL connector использует одну task | Только `1`
+|`database.hostname` — адрес PostgreSQL | Задать явно | Задать явно
+|`database.port` — порт БД | `5432` | `5432`
+|`database.user` — пользователь БД | Задать явно | Задать явно
+|`database.password` — пароль | Задать явно | Задать явно, не хранить в Git
+|`database.dbname` — база захвата | Задать явно | Задать явно
+|`topic.prefix` — логическое имя источника и префикс topics | Задать явно | Задать явно; не менять без плана миграции
+|`plugin.name` — PostgreSQL decoding plugin | `decoderbufs` в сохранённом контракте | `pgoutput`; другие значения отклоняются
+|`slot.name` — replication slot | `debezium` | Обязательное явное значение
+|`publication.name` — публикация таблиц | `dbz_publication` | Обязательное явное значение
+|`publication.autocreate.mode` — создание publication | `all_tables` | `all_tables`; допустимы также `disabled`, `filtered`, `no_tables`
+|`slot.drop.on.stop` — удаление slot при остановке | `false` | `false`; включение опасно потерей позиции захвата
+|`slot.failover` — создание failover slot | `false` | `false`; использование требует отдельной проверки HA и поддержки PostgreSQL
+|`slot.stream.params` — параметры протокола `pgoutput` | Не задано | Не задано; список `key=value;key=value`; см. ограничения ниже
+|`status.update.interval.ms` — период replication status updates | `10000` | `10000`, положительное целое
+|`database.query.timeout.ms` — timeout SQL-запросов | `600000` | `600000`; `0` отключает statement timeout
+|`database.initial.statements` — SQL инициализации соединения | Не задано | Не задано; разделитель `;`, литеральный `;` экранируется `;;`
+|`database.sslmode` — TLS-режим подключения | `prefer` | `prefer`; для production явно выбирать `verify-full` при наличии PKI
+|`database.sslrootcert` — файл доверенного CA | Не задано | Не задано; путь на worker
+|`database.sslcert` — клиентский сертификат | Не задано | Не задано; передаётся JDBC
+|`database.sslkey` — ключ клиентского сертификата | Не задано | Не задано; путь на worker, не в Git
+|`database.sslpassword` — пароль TLS-ключа | Не задано | Не задано; секрет
+|`database.sslfactory` — фабрика TLS | Не задано | Не задано; передаётся JDBC
+|`database.tcpKeepAlive` — TCP keepalive | `true` | `true`
+|`driver.*` — дополнительные параметры PostgreSQL JDBC | Дополнительные JDBC-настройки | Передаются JDBC без префикса; могут переопределять общие настройки; `connectTimeout` по умолчанию `5` секунд
+|===
+
+=== Выбор данных и формат событий
+
+[cols="40%a,25%a,35%a",options="header"]
+|===
+|Параметр и для чего он нужен | Оригинальный Debezium | Наш коннектор
+|`snapshot.mode` — начальная выгрузка и переход к CDC | `initial` | `no_data`; допустимы только `no_data`, `initial`
+|`table.include.list` — включение таблиц по regex | Не задано | Пустой список; regex полного `schema.table`
+|`table.exclude.list` — исключение таблиц по regex | Не задано | Не задано; нельзя совмещать с include для таблиц
+|`schema.include.list` — включение схем по regex | Не задано | Не задано
+|`schema.exclude.list` — исключение схем по regex | Не задано | Не задано; нельзя совмещать с include для схем
+|`column.include.list` — включение колонок | Не задано | Не задано
+|`column.exclude.list` — исключение колонок | Не задано | Не задано; нельзя совмещать с include для колонок
+|`schema.refresh.mode` — обновление схемы при изменениях и TOAST | `columns_diff` | Обязательно явно `columns_diff_exclude_unchanged_toast`
+|`skipped.operations` — пропуск типов операций | `t` | `t`; допустимы подмножества `c,u,d,t` или `none`
+|`include.schema.changes` — события изменения схем | В PostgreSQL не универсальный DDL stream | Только `false`
+|`extended.headers.enabled` — дополнительные context headers | `true` | Только `false`
+|`provide.transaction.metadata` — метаданные транзакций | `false` | `false`; можно включить `true`
+|`tombstones.on.delete` — null-событие после delete для compaction | `true` | `false`; для эквивалентности явно `true`
+|`decimal.handling.mode` — представление decimal | `precise` | `precise`; также `string`, `double`
+|`binary.handling.mode` — представление bytea | `bytes` | `bytes`; также `base64`, `base64-url-safe`, `hex`
+|`hstore.handling.mode` — представление hstore | `json` | `json`; также `map`
+|`interval.handling.mode` — представление interval | `numeric` | `numeric`; также `string`
+|`time.precision.mode` — точность временных типов | `adaptive` | `adaptive`; также `adaptive_time_microseconds`, `connect`, `isostring`, `microseconds`, `nanoseconds`
+|`include.unknown.datatypes` — обработка неизвестных типов | `false` | `false`
+|`event.processing.failure.handling.mode` — реакция на ошибки событий | `fail` | `fail`; `warn` и `skip` могут терять события, не использовать для строгой доставки
+|`column.propagate.source.type` — метаданные исходного типа колонок | Не задано | Не задано; regex-список
+|`datatype.propagate.source.type` — метаданные выбранных типов | Не задано | Не задано; regex-список
+|`column.truncate.to.<N>.chars` — ограничение длины значения | Не задано | Не задано; regex колонок, действует на value
+|`column.mask.with.<N>.chars` — маскировка значения | Не задано | Не задано; regex колонок, действует на value
+|`column.mask.hash.<algorithm>.with.salt.<salt>` — salted hash значения | Не задано | Не задано; также поддерживается вариант `hash.v2`; соль не хранить в Git
+|`converters` и `<alias>.*` — пользовательские Debezium converters | Не задано | Не задано; классы должны быть доступны на worker
+|`transforms` и `transforms.<alias>.*` — Kafka Connect SMT | Настраиваются Kafka Connect | Поддержаны через Connect; при задании список aliases не должен быть пустым
+|`predicates` и `predicates.<alias>.*` — условия SMT | Настраиваются Kafka Connect | Настраиваются Kafka Connect
+|`key.converter`, `value.converter` — сериализация в Kafka | Настройка worker или connector | Обязательно явно `io.cdcbench.connect.optimized.OptimizedJsonConverter` для обоих
+|`key.converter.schemas.enable`, `value.converter.schemas.enable` — JSON со схемой | Зависит от converter; JsonConverter обычно `true` | `false`; оба значения должны совпадать; можно оба `true`
+|`compatibility.source.version` — поле `source.version` в событии | Версия оригинального connector | `3.6.0.Final`; это совместимость payload, не версия нашего бинарника
+|===
+
+=== Heartbeat и сигналы
+
+[cols="40%a,25%a,35%a",options="header"]
+|===
+|Параметр и для чего он нужен | Оригинальный Debezium | Наш коннектор
+|`heartbeat.interval.ms` — период heartbeat-событий | `0`, выключено | `1000` мс; `0` выключает; отрицательное значение запрещено
+|`heartbeat.topics.prefix` — префикс heartbeat topics | `__debezium-heartbeat` | При стандартной naming strategy `__debezium-heartbeat`
+|`heartbeat.action.query` — SQL heartbeat для активности в БД | Не задано | Не задано; используйте только согласованный идемпотентный SQL
+|`topic.naming.strategy` — стратегия имён topics | `io.debezium.schema.SchemaTopicNamingStrategy` | Тот же default; собственная реализация требует доступного SPI-класса
+|`signal.data.collection` — таблица команд snapshot | Не задано | Не задано; одно точное `schema.table`
+|`signal.enabled.channels` — каналы команд | `source` | `source`; допустимы только `source`, `kafka` и их комбинация
+|`signal.poll.interval.ms` — период опроса сигналов | `5000` | `5000`; целое не меньше `0`
+|`signal.kafka.topic` — topic сигналов | Kafka channel, значение зависит от настройки | По умолчанию `<topic.prefix>-signal`
+|`signal.kafka.groupId` — consumer group сигналов | Kafka channel, отдельная настройка | `kafka-signal`
+|`signal.kafka.bootstrap.servers` — brokers канала сигналов | Настройка Kafka channel | Обязательно при включении `kafka`
+|`signal.kafka.poll.timeout.ms` — timeout consumer poll | Настройка Kafka channel | `100`; целое не меньше `0`
+|`signal.consumer.*` — дополнительные consumer properties | Настройка Kafka channel | Передаются consumer без префикса; критические bootstrap/group/deserializer/auto-commit задаются каналом
+|`incremental.snapshot.chunk.size` — размер порции incremental snapshot | `1024` | `1024`, положительное целое
+|`read.only` — read-only режим incremental snapshot | Версионная настройка Debezium | `false`
+|===
+
+Heartbeat публикуется через task poll, а не независимым таймером доставки. Интервал не является гарантией появления события каждую миллисекунду указанного периода: snapshot, очередь и незавершённые batches могут задерживать отправку. Heartbeat event и `status.update.interval.ms` — разные механизмы. По умолчанию topic — `__debezium-heartbeat.<topic.prefix>`.
+
+=== Производительность и память
+
+[cols="40%a,25%a,35%a",options="header"]
+|===
+|Параметр и для чего он нужен | Оригинальный Debezium | Наш коннектор
+|`poll.interval.ms` — интервал SourceTask poll | `500` | `100`; не меньше `1`
+|`max.batch.size` — максимум records одного poll | `2048` | `8192`; положительное, не больше `max.queue.size`
+|`max.queue.size` — ограничение очереди records | `8192` | `32768`; положительное
+|`optimized.execution.mode` — выбор pipeline | Отсутствует | `fast`; `auto` и `debezium` отклоняются
+|`optimized.processing.workers` — число внутренних потоков | Отсутствует | `1`; диапазон `1..64`
+|`optimized.processing.chunk.size` — размер порции внутренней обработки | Отсутствует | `512`, положительное целое
+|`optimized.max.inflight.transactions` — число транзакций в обработке | Отсутствует | `16`, положительное целое
+|`optimized.max.inflight.bytes` — порог памяти буферизации транзакций | Отсутствует | `67108864` байт, положительное; это не лимит heap всего worker
+|`optimized.transaction.spill.directory` — диск для больших транзакций | Отсутствует | `${java.io.tmpdir}/optimized-postgres-transactions`; явно задайте рабочий каталог с контролем свободного места
+|`optimized.raw.utf8.enabled` — ускоренная обработка UTF-8 | Отсутствует | `false`; включение проверять на целевом наборе данных
+|===
+
+`max.batch.size` задаёт предел выдачи одного poll. `optimized.processing.chunk.size` задаёт размер порции внутренней обработки.
+
+Начните с явных defaults и измерьте throughput, p95, CPU, память, lag и размер spill. Затем меняйте только один параметр за прогон. Сравнение с оригиналом проводите при одинаковых Kafka Connect/JVM, данных, формате событий, snapshot, heartbeat и tombstones. Большее число потоков само по себе не гарантирует прирост.
+
+== Ограничения и безопасное обновление
+
+Неперечисленные параметры оригинала не следует переносить автоматически: `FastPathSelector` отклоняет настройки вне своего allowlist. В частности, в оптимизированном коннекторе нельзя задавать `max.queue.size.in.bytes`, `snapshot.max.threads`, `snapshot.fetch.size`, `snapshot.delay.ms`, `snapshot.isolation.mode`, `message.key.columns`, `slot.max.retries`, `slot.retry.delay.ms`, `lsn.flush.*`, `notification.*`, `openlineage.*`, `post.processors`, `publish.via.partition.root`, `replica.identity.autoset.values`. Наличие таких параметров в REST contract не означает их поддержку runtime.
+
+Для `slot.stream.params` допустим `proto_version=1..4`; по умолчанию используется `1`, а при `two_phase=true` без явной версии — `3`. `two_phase=true` требует версии не ниже `3`; `streaming=on` требует явно указанной версии не ниже `2`. `streaming` принимает только `on`/`off`. `publication_names` нельзя задавать здесь: используется `publication.name`. Duplicate keys запрещены. Для two-phase, failover и distributed exactly-once проверьте поддержку выбранной конфигурации на своём стенде.
+
+Логические сообщения по умолчанию выключены в native path. Для их включения задайте один из regex-фильтров `message.prefix.include.list` или `message.prefix.exclude.list`; одновременно оба запрещены. Тестируйте формат и фильтрацию до production.
+
+`transaction.boundary` принимает `poll` или `connector`. Значение по умолчанию — `poll`. Для exactly-once настройте distributed worker и Kafka broker и проверьте выбранный режим транзакций.
+
+Перед обновлением сохраните конфигурацию, текущий архив и offsets согласно xref:../upgrading.adoc[инструкции по обновлению]. Остановите захват без удаления slot, обновите plugin одинаково на всех workers и проверьте возобновление, lag и контрольные события insert/update/delete. Не меняйте одновременно topic prefix, slot, converters и семантику payload. Rollback должен сохранять позицию CDC; повторный snapshot вместо восстановления offsets не является доказанным rollback.
+
+Связанные документы: xref:../operations.adoc[эксплуатация], xref:../upgrading.adoc[обновление и rollback].
+
+== Справочник оригинального коннектора
+
+https://github.com/debezium/debezium/blob/v3.6.0.Final/documentation/modules/ROOT/pages/connectors/postgresql.adoc[Документация Debezium PostgreSQL 3.6.0.Final].

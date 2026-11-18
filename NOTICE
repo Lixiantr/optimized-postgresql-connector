@@ -1,0 +1,5 @@
+Optimized PostgreSQL CDC Connector
+Copyright 2026 CDC Benchmark contributors
+
+This product includes the PostgreSQL JDBC Driver, distributed under the
+BSD 2-Clause License. Apache Kafka Connect provides the worker runtime.

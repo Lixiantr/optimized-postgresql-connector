@@ -1,0 +1,7 @@
+target/
+/plugin/
+*.tar.gz
+.env
+.idea/
+.vscode/
+*.iml
