@@ -1,21 +1,21 @@
-= Эксплуатация PostgreSQL connector
+= PostgreSQL connector operations
 :toc:
 
-== Мониторинг
+== Monitoring
 
-Отслеживайте состояние коннектора и task через Kafka Connect REST.
-На PostgreSQL контролируйте `confirmed_flush_lsn`, `restart_lsn` и объём удерживаемого WAL.
-На worker следите за CPU, памятью JVM и свободным местом в каталоге `optimized.transaction.spill.directory`.
+Use the Kafka Connect REST API to monitor the connector and its task.
+In PostgreSQL, track `confirmed_flush_lsn`, `restart_lsn`, and the amount of retained WAL.
+On each worker, monitor CPU, JVM memory, and free space in `optimized.transaction.spill.directory`.
 
-== Диагностика
+== Troubleshooting
 
-. Сохраните состояние task и её журнал.
-. Проверьте соединения worker с PostgreSQL и Kafka.
-. Убедитесь, что слот использует `pgoutput` и относится к нужной базе.
-. Проверьте доступность публикации, права пользователя и каталог для выгрузки больших транзакций.
-. После устранения причины проверьте восстановление потока событий и продвижение позиции слота.
+. Save the task status and its log.
+. Check the worker's connections to PostgreSQL and Kafka.
+. Confirm that the slot uses `pgoutput` and belongs to the intended database.
+. Check publication availability, user privileges, and access to the transaction spill directory.
+. After fixing the issue, verify that events flow again and the slot position advances.
 
 [IMPORTANT]
 ====
-Для перезапуска сохраняйте слот и Kafka Connect source offsets. Удаление слота может лишить коннектор доступной позиции чтения WAL.
+Keep the replication slot and Kafka Connect source offsets when restarting. Dropping the slot can make the required WAL position unavailable.
 ====

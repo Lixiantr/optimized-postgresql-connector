@@ -1,20 +1,20 @@
-= Обновление и откат PostgreSQL connector
+= PostgreSQL connector upgrades and rollback
 :toc:
 
-== Перед обновлением
+== Before upgrading
 
-Сохраните текущий плагин, конфигурацию, Kafka Connect source offsets и состояние replication slot.
-Проверьте совместимость целевой версии с форматом offsets и с форматом событий, который используют потребители.
+Back up the current plugin, configuration, Kafka Connect source offsets, and replication slot state.
+Check that the target version supports the existing offset format and the event format used by consumers.
 
-== Обновление
+== Upgrading
 
-. Остановите коннектор и дождитесь состояния `STOPPED`.
-. Зафиксируйте итоговые offsets и `confirmed_flush_lsn`.
-. Установите одинаковую версию плагина на всех workers. Сохраните имя коннектора, slot, publication и `topic.prefix`.
-. Перезапустите workers и возобновите коннектор. Проверьте статус task, контрольные события и продвижение LSN.
+. Stop the connector and wait for `STOPPED`.
+. Record the final offsets and `confirmed_flush_lsn`.
+. Install the same plugin version on every worker. Keep the connector name, slot, publication, and `topic.prefix`.
+. Restart the workers and resume the connector. Check task status, verify sample events, and confirm LSN progress.
 
-== Откат
+== Rolling back
 
-Используйте предыдущую версию, если она читает offsets, записанные текущей версией.
-Остановите коннектор, восстановите прежний плагин и конфигурацию, затем повторите проверки.
-Если формат offsets несовместим или нужный WAL уже недоступен, потребуется отдельная процедура восстановления или миграции.
+Use the previous version if it can read the offsets written by the current version.
+Stop the connector, restore the previous plugin and configuration, and repeat the verification steps.
+If the offset format is incompatible or the required WAL is unavailable, follow a separate recovery or migration procedure.

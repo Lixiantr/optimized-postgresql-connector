@@ -1,8 +1,8 @@
 = Optimized PostgreSQL Connector
 
-Java-коннектор для Kafka Connect читает изменения PostgreSQL через `pgoutput`.
-Внутренние потоки обрабатывают записи параллельно, сохраняя порядок выдачи.
+This Java connector for Kafka Connect captures PostgreSQL changes through `pgoutput`.
+Internal workers process records in parallel while preserving output order.
 
-* xref:connectors/postgresql.adoc[Подготовка базы, развёртывание и параметры].
-* xref:operations.adoc[Мониторинг и диагностика].
-* xref:upgrading.adoc[Обновление и откат].
+* xref:connectors/postgresql.adoc[Database setup, deployment, and configuration].
+* xref:operations.adoc[Monitoring and troubleshooting].
+* xref:upgrading.adoc[Upgrades and rollback].

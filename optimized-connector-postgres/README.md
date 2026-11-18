@@ -1,10 +1,10 @@
-# Захват изменений PostgreSQL
+# Capturing PostgreSQL changes
 
-Модуль реализует source connector для Kafka Connect. Для работы используются логическая репликация PostgreSQL, отдельный replication slot и публикация с нужными таблицами.
+This module implements a Kafka Connect source connector. It uses PostgreSQL logical replication, a dedicated replication slot, and a publication that includes the tables to capture.
 
-## Использование с Kafka Connect
+## Using the connector with Kafka Connect
 
-Соберите JAR и подготовьте каталог плагина. Выполните команды из корня репозитория в POSIX-оболочке.
+Build the JAR and prepare the plugin directory. Run the following commands from the repository root in a POSIX shell.
 
 ```sh
 mvn -B -ntp clean verify
@@ -16,13 +16,13 @@ mvn -B -ntp org.apache.maven.plugins:maven-dependency-plugin:3.8.1:copy \
   -DoutputDirectory="$PWD/plugin/optimized-postgres-connector"
 ```
 
-Скопируйте подготовленный каталог в `plugin.path` на каждом worker и перезапустите Kafka Connect. Настройки PostgreSQL, JSON-пример и сравнение параметров приведены в [справочнике](../documentation/modules/ROOT/pages/connectors/postgresql.adoc).
+Place the prepared directory under `plugin.path` on each worker and restart Kafka Connect. See the [connector reference](../documentation/modules/ROOT/pages/connectors/postgresql.adoc) for PostgreSQL setup, a JSON example, and a configuration comparison.
 
-## Тестирование
+## Testing
 
-Unit-тесты `*Test` выполняются в Maven при `clean verify`.
+Maven runs `*Test` unit tests during `clean verify`.
 
-Интеграционный набор Kafka проверяет доставку сигнала, подтверждение его позиции и закрытие consumer. Запускайте его с отдельным тестовым брокером Kafka 4.3.0. Набор создаёт тестовые topics.
+The Kafka integration suite checks signal delivery, offset commits, and consumer shutdown. Run it against a dedicated Kafka 4.3.0 test broker. The suite creates test topics.
 
 ```sh
 mvn -B -ntp install

@@ -1,4 +1,4 @@
-* xref:index.adoc[Обзор]
+* xref:index.adoc[Overview]
 * xref:connectors/postgresql.adoc[PostgreSQL connector]
-* xref:operations.adoc[Эксплуатация]
-* xref:upgrading.adoc[Обновление и откат]
+* xref:operations.adoc[Operations]
+* xref:upgrading.adoc[Upgrades and rollback]
